@@ -26,6 +26,8 @@ Core/Src \
 Core/Startup \
 Drivers/BSP/STM32G4xx_Nucleo \
 Drivers/STM32G4xx_HAL_Driver/Src \
+ECUAL/BUZZER \
 ECUAL/I2C_LCD \
+ECUAL/MQ2 \
 util \
 

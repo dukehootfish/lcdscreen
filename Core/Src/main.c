@@ -4,52 +4,89 @@
  * For More Info Visit: www.DeepBlueMbedded.com
 */
 #include "main.h"
+#include <stdio.h>
 #include "../../ECUAL/I2C_LCD/I2C_LCD.h"
+#include "../../ECUAL/MQ2/MQ2.h"
+#include "../../ECUAL/BUZZER/BUZZER.h"
 
 #define MyI2C_LCD I2C_LCD_1
+#define LCD_COLS  16
+#define LOOP_PERIOD_MS 250
+#define ALARM_TONE_HZ  2500   // Passive buzzers are usually loudest around 2-4 kHz
 
+ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
-
-uint8_t HeartChar[] = {0x00, 0x00, 0x0a, 0x15, 0x11, 0x0a, 0x04, 0x00};
-uint8_t SmileyFaceChar[] = {0x00, 0x00, 0x0a, 0x00, 0x1f, 0x11, 0x0e, 0x00};
+TIM_HandleTypeDef htim2;
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_TIM2_Init(void);
 
 int main(void)
 {
   HAL_Init();
   SystemClock_Config();
   MX_GPIO_Init();
+  MX_ADC1_Init();
   MX_I2C1_Init();
+  MX_TIM2_Init();
+
+  BUZZER_Init(&htim2, TIM_CHANNEL_2);
+  // Short beep at power-up to show the buzzer works
+  BUZZER_Tone(ALARM_TONE_HZ);
+  HAL_Delay(100);
+  BUZZER_Off();
 
   I2C_LCD_Init(MyI2C_LCD);
-  I2C_LCD_CreateCustomChar(MyI2C_LCD, 0, HeartChar);
-  I2C_LCD_CreateCustomChar(MyI2C_LCD, 1, SmileyFaceChar);
   I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
   I2C_LCD_WriteString(MyI2C_LCD, "BIU Racing");
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
-  I2C_LCD_WriteString(MyI2C_LCD, "Smoke detected");
-  I2C_LCD_PrintCustomChar(MyI2C_LCD, 1);
-  I2C_LCD_PrintCustomChar(MyI2C_LCD, 0);
+
+  MQ2_Init(&hadc1);
+
+  char Line[LCD_COLS + 1];
+  uint8_t AlarmBlink = 0;
 
   while (1)
   {
-	I2C_LCD_NoBacklight(MyI2C_LCD);	HAL_Delay(1000);
-	I2C_LCD_Backlight(MyI2C_LCD);	HAL_Delay(1000);
-	I2C_LCD_ShiftRight(MyI2C_LCD);	HAL_Delay(500);
-	I2C_LCD_ShiftRight(MyI2C_LCD);	HAL_Delay(500);
-	I2C_LCD_ShiftRight(MyI2C_LCD);	HAL_Delay(500);
-	I2C_LCD_ShiftLeft(MyI2C_LCD);	HAL_Delay(500);
-	I2C_LCD_ShiftLeft(MyI2C_LCD);	HAL_Delay(500);
-	I2C_LCD_ShiftLeft(MyI2C_LCD);	HAL_Delay(500);
-	I2C_LCD_Cursor(MyI2C_LCD);		HAL_Delay(1000);
-	I2C_LCD_Blink(MyI2C_LCD);		HAL_Delay(2000);
-	I2C_LCD_NoBlink(MyI2C_LCD);		HAL_Delay(2000);
-	I2C_LCD_NoCursor(MyI2C_LCD);	HAL_Delay(1000);
-	I2C_LCD_NoDisplay(MyI2C_LCD);	HAL_Delay(1000);
-	I2C_LCD_Display(MyI2C_LCD);		HAL_Delay(1000);
+	MQ2_State_t State = MQ2_Update();
+	uint32_t mV = MQ2_GetMillivolts();
+
+	// Every line is padded to the full LCD width so it overwrites the previous one
+	if (State == MQ2_WARMING_UP)
+	{
+		snprintf(Line, sizeof(Line), "%-12s%3lus", "Warming up", MQ2_GetWarmupSecondsLeft());
+	}
+	else
+	{
+		// One volts digit is enough: with the 10k/20k divider AO reads at most 4.95V
+		snprintf(Line, sizeof(Line), "%-11s%lu.%02luV", (State == MQ2_SMOKE) ? "Air Toxic" : "Air OK",
+		         (mV / 1000) % 10, (mV % 1000) / 10);
+	}
+	I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
+	I2C_LCD_WriteString(MyI2C_LCD, Line);
+
+	// While smoke is detected, flash the backlight and beep together every other loop
+	AlarmBlink = (State == MQ2_SMOKE) ? !AlarmBlink : 0;
+	if (State != MQ2_SMOKE || AlarmBlink)
+	{
+		I2C_LCD_Backlight(MyI2C_LCD);
+	}
+	else
+	{
+		I2C_LCD_NoBacklight(MyI2C_LCD);
+	}
+	if (AlarmBlink)
+	{
+		BUZZER_Tone(ALARM_TONE_HZ);
+	}
+	else
+	{
+		BUZZER_Off();
+	}
+
+	HAL_Delay(LOOP_PERIOD_MS);
   }
 }
 
@@ -101,6 +138,80 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_MultiModeTypeDef multimode = {0};
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Common config
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;  /* 170 MHz / 4 = 42.5 MHz (max 60 MHz) */
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.GainCompensation = 0;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the ADC multi-mode
+  */
+  multimode.Mode = ADC_MODE_INDEPENDENT;
+  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  * PA0 (Arduino A0) = ADC1_IN1. The longest sampling time suits the
+  * high source impedance of the sensor's voltage divider.
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+  /* Calibrate once while the ADC is still disabled */
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
   * @brief I2C1 Initialization Function
   * @param None
   * @retval None
@@ -145,6 +256,55 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 169;  /* 170 MHz / (169 + 1) = 1 MHz tick, see BUZZER_TIMER_TICK_HZ */
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 399;     /* 1 MHz / (399 + 1) = 2.5 kHz, changed by BUZZER_Tone() */
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;         /* 0% duty = silent */
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
 
 }
 

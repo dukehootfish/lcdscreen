@@ -11,18 +11,59 @@
 
 #define MyI2C_LCD I2C_LCD_1
 #define LCD_COLS  16
+#define LABEL_COLS 10                      // "Air Toxic" + a space
+#define BAR_COLS  (LCD_COLS - LABEL_COLS)  // 6 characters x 5 pixel columns = 30 steps
+#define BAR_CHAR_FIRST 1                   // Custom chars 1-6 = bar cell with 0-5 columns filled (0 can't go in a C string)
 #define LOOP_PERIOD_MS 250
 #define ALARM_TONE_HZ  2500   // Passive buzzers are usually loudest around 2-4 kHz
 
 ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 TIM_HandleTypeDef htim2;
+COM_InitTypeDef BspCOMInit;
+
+// Indexed by MQ2_State_t, shared by the LCD and the terminal output
+static const char* const StateNames[] = {"Warming up", "Air OK", "Air Toxic", "Air Very Toxic"};
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM2_Init(void);
+
+// Loads the bar cells into the LCD: a frame line on top and bottom, filled from the left
+static void LCD_CreateBarChars(void)
+{
+	uint8_t CharMap[8];
+
+	for (uint8_t Filled = 0; Filled <= 5; Filled++)
+	{
+		uint8_t Fill = (0x1F << (5 - Filled)) & 0x1F;
+		CharMap[0] = 0x1F;
+		for (uint8_t Row = 1; Row < 7; Row++)
+		{
+			CharMap[Row] = Fill;
+		}
+		CharMap[7] = 0x1F;
+		I2C_LCD_CreateCustomChar(MyI2C_LCD, BAR_CHAR_FIRST + Filled, CharMap);
+	}
+}
+
+// Writes Cells bar characters to Dest, filled to Percent (full only at 100%)
+static void LCD_BuildBar(char* Dest, uint8_t Cells, uint8_t Percent)
+{
+	uint16_t FilledPx = ((uint16_t)Percent * Cells * 5) / 100;
+
+	for (uint8_t i = 0; i < Cells; i++)
+	{
+		uint16_t CellPx = (FilledPx > i * 5) ? FilledPx - i * 5 : 0;
+		if (CellPx > 5)
+		{
+			CellPx = 5;
+		}
+		Dest[i] = (char)(BAR_CHAR_FIRST + CellPx);
+	}
+}
 
 int main(void)
 {
@@ -33,6 +74,22 @@ int main(void)
   MX_I2C1_Init();
   MX_TIM2_Init();
 
+  /* Initialize COM1 port (115200, 8 bits, 1 stop bit, no parity)
+   * COM1 = LPUART1 on PA2/PA3, wired to the ST-LINK USB Virtual COM Port.
+   * The BSP sends printf() output here. */
+  BspCOMInit.BaudRate   = 115200;
+  BspCOMInit.WordLength = COM_WORDLENGTH_8B;
+  BspCOMInit.StopBits   = COM_STOPBITS_1;
+  BspCOMInit.Parity     = COM_PARITY_NONE;
+  BspCOMInit.HwFlowCtl  = COM_HWCONTROL_NONE;
+  if (BSP_COM_Init(COM1, &BspCOMInit) != BSP_ERROR_NONE)
+  {
+    Error_Handler();
+  }
+  // Send each printf() right away instead of holding it in a buffer
+  setvbuf(stdout, NULL, _IONBF, 0);
+  printf("\r\nBIU Racing smoke sensor started\r\n");
+
   BUZZER_Init(&htim2, TIM_CHANNEL_2);
   // Short beep at power-up to show the buzzer works
   BUZZER_Tone(ALARM_TONE_HZ);
@@ -40,6 +97,7 @@ int main(void)
   BUZZER_Off();
 
   I2C_LCD_Init(MyI2C_LCD);
+  LCD_CreateBarChars();
   I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
   I2C_LCD_WriteString(MyI2C_LCD, "BIU Racing");
 
@@ -52,24 +110,28 @@ int main(void)
   {
 	MQ2_State_t State = MQ2_Update();
 	uint32_t mV = MQ2_GetMillivolts();
+	uint8_t Percent = MQ2_GetAlarmPercent();
+
+	printf("%s, MQ2: %lu mV, %u%% of toxic level\r\n", StateNames[State], mV, Percent);
 
 	// Every line is padded to the full LCD width so it overwrites the previous one
 	if (State == MQ2_WARMING_UP)
 	{
-		snprintf(Line, sizeof(Line), "%-12s%3lus", "Warming up", MQ2_GetWarmupSecondsLeft());
+		snprintf(Line, sizeof(Line), "%-12s%3lus", StateNames[State], MQ2_GetWarmupSecondsLeft());
 	}
 	else
 	{
-		// One volts digit is enough: with the 10k/20k divider AO reads at most 4.95V
-		snprintf(Line, sizeof(Line), "%-11s%lu.%02luV", (State == MQ2_SMOKE) ? "Air Toxic" : "Air OK",
-		         (mV / 1000) % 10, (mV % 1000) / 10);
+		// Label on the left, bar to the right: full bar = Air Toxic threshold
+		snprintf(Line, sizeof(Line), "%-*s", LABEL_COLS, StateNames[State]);
+		LCD_BuildBar(&Line[LABEL_COLS], BAR_COLS, Percent);
+		Line[LCD_COLS] = '\0';
 	}
 	I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
 	I2C_LCD_WriteString(MyI2C_LCD, Line);
 
 	// While smoke is detected, flash the backlight and beep together every other loop
-	AlarmBlink = (State == MQ2_SMOKE) ? !AlarmBlink : 0;
-	if (State != MQ2_SMOKE || AlarmBlink)
+	AlarmBlink = (State == MQ2_TOXIC || State == MQ2_VERY_TOXIC) ? !AlarmBlink : 0;
+	if (State != MQ2_TOXIC || State != MQ2_VERY_TOXIC || AlarmBlink)
 	{
 		I2C_LCD_Backlight(MyI2C_LCD);
 	}

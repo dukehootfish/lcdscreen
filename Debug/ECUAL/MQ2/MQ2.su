@@ -1,5 +1,6 @@
-../ECUAL/MQ2/MQ2.c:26:16:MQ2_ReadAveragedRaw	32	static
-../ECUAL/MQ2/MQ2.c:60:6:MQ2_Init	16	static
-../ECUAL/MQ2/MQ2.c:69:13:MQ2_Update	16	static
-../ECUAL/MQ2/MQ2.c:98:10:MQ2_GetMillivolts	4	static
-../ECUAL/MQ2/MQ2.c:103:10:MQ2_GetWarmupSecondsLeft	16	static
+../ECUAL/MQ2/MQ2.c:30:16:MQ2_ReadAveragedRaw	32	static
+../ECUAL/MQ2/MQ2.c:64:6:MQ2_Init	16	static
+../ECUAL/MQ2/MQ2.c:73:13:MQ2_Update	16	static
+../ECUAL/MQ2/MQ2.c:105:10:MQ2_GetMillivolts	4	static
+../ECUAL/MQ2/MQ2.c:111:9:MQ2_GetAlarmPercent	4	static
+../ECUAL/MQ2/MQ2.c:123:10:MQ2_GetWarmupSecondsLeft	16	static

@@ -13,6 +13,10 @@
 #define MQ2_ADC_MAX             4095    // 12-bit ADC full scale
 #define MQ2_ADC_TIMEOUT_MS      10
 
+#if MQ2_CLEAN_AIR_MV >= MQ2_ALARM_ON_MV_LOW || MQ2_CLEAN_AIR_MV >= MQ2_ALARM_ON_MV_HIGH
+#error "MQ2_CLEAN_AIR_MV must be below MQ2_ALARM_ON_MV"
+#endif
+
 /*-----------------------[INTERNAL VARIABLES]-----------------------*/
 
 static ADC_HandleTypeDef* MQ2_ADC_Handle_g;
@@ -81,11 +85,14 @@ MQ2_State_t MQ2_Update(void)
 	{
 		MQ2_State_g = MQ2_WARMING_UP;
 	}
-	else if (MQ2_Millivolts_g >= MQ2_ALARM_ON_MV)
+	else if (MQ2_Millivolts_g >= MQ2_ALARM_ON_MV_LOW && MQ2_Millivolts_g < MQ2_ALARM_ON_MV_HIGH)
 	{
-		MQ2_State_g = MQ2_SMOKE;
+		MQ2_State_g = MQ2_TOXIC;
 	}
-	else if (MQ2_State_g != MQ2_SMOKE || MQ2_Millivolts_g <= MQ2_ALARM_OFF_MV)
+	else if (MQ2_Millivolts_g >= MQ2_ALARM_ON_MV_HIGH){
+		MQ2_State_g = MQ2_VERY_TOXIC;
+	}
+	else if (MQ2_State_g != MQ2_TOXIC || MQ2_State_g != MQ2_VERY_TOXIC || MQ2_Millivolts_g <= MQ2_ALARM_OFF_MV)
 	{
 		MQ2_State_g = MQ2_CLEAR;
 	}
@@ -98,6 +105,19 @@ MQ2_State_t MQ2_Update(void)
 uint32_t MQ2_GetMillivolts(void)
 {
 	return MQ2_Millivolts_g;
+}
+
+// How close the last reading is to the alarm: 0% at MQ2_CLEAN_AIR_MV, 100% at MQ2_ALARM_ON_MV
+uint8_t MQ2_GetAlarmPercent(void)
+{
+	if (MQ2_Millivolts_g <= MQ2_CLEAN_AIR_MV)
+	{
+		return 0;
+	}
+	if (MQ2_Millivolts_g >= MQ2_ALARM_ON_MV_HIGH){
+		return 100;
+	}
+	return (uint8_t)(((MQ2_Millivolts_g - MQ2_CLEAN_AIR_MV) * 100) / (MQ2_ALARM_ON_MV_HIGH - MQ2_CLEAN_AIR_MV));
 }
 
 uint32_t MQ2_GetWarmupSecondsLeft(void)

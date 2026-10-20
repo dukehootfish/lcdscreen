@@ -14,7 +14,7 @@
 #define MQ2_ADC_TIMEOUT_MS      10
 
 #if MQ2_CLEAN_AIR_MV >= MQ2_ALARM_ON_MV_LOW || MQ2_CLEAN_AIR_MV >= MQ2_ALARM_ON_MV_HIGH
-#error "MQ2_CLEAN_AIR_MV must be below MQ2_ALARM_ON_MV"
+#error "MQ2_CLEAN_AIR_MV must be below MQ2_ALARM_ON_MV_LOW and MQ2_ALARM_ON_MV_HIGH"
 #endif
 
 /*-----------------------[INTERNAL VARIABLES]-----------------------*/
@@ -92,11 +92,15 @@ MQ2_State_t MQ2_Update(void)
 	else if (MQ2_Millivolts_g >= MQ2_ALARM_ON_MV_HIGH){
 		MQ2_State_g = MQ2_VERY_TOXIC;
 	}
-	else if (MQ2_State_g != MQ2_TOXIC || MQ2_State_g != MQ2_VERY_TOXIC || MQ2_Millivolts_g <= MQ2_ALARM_OFF_MV)
+	else if ((MQ2_State_g != MQ2_TOXIC && MQ2_State_g != MQ2_VERY_TOXIC) || MQ2_Millivolts_g <= MQ2_ALARM_OFF_MV)
 	{
 		MQ2_State_g = MQ2_CLEAR;
 	}
-	// Otherwise stay in MQ2_SMOKE until the level drops below MQ2_ALARM_OFF_MV
+	else
+	{
+		// Already alarming and still above MQ2_ALARM_OFF_MV: keep the alarm on (hysteresis)
+		MQ2_State_g = MQ2_TOXIC;
+	}
 
 	return MQ2_State_g;
 }
@@ -107,7 +111,7 @@ uint32_t MQ2_GetMillivolts(void)
 	return MQ2_Millivolts_g;
 }
 
-// How close the last reading is to the alarm: 0% at MQ2_CLEAN_AIR_MV, 100% at MQ2_ALARM_ON_MV
+// How close the last reading is to very toxic: 0% at MQ2_CLEAN_AIR_MV, 100% at MQ2_ALARM_ON_MV_HIGH
 uint8_t MQ2_GetAlarmPercent(void)
 {
 	if (MQ2_Millivolts_g <= MQ2_CLEAN_AIR_MV)

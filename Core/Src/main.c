@@ -112,16 +112,21 @@ int main(void)
 	uint32_t mV = MQ2_GetMillivolts();
 	uint8_t Percent = MQ2_GetAlarmPercent();
 
-	printf("%s, MQ2: %lu mV, %u%% of toxic level\r\n", StateNames[State], mV, Percent);
+	printf("%s, MQ2: %lu mV, %u%% of very toxic level\r\n", StateNames[State], mV, Percent);
 
 	// Every line is padded to the full LCD width so it overwrites the previous one
 	if (State == MQ2_WARMING_UP)
 	{
 		snprintf(Line, sizeof(Line), "%-12s%3lus", StateNames[State], MQ2_GetWarmupSecondsLeft());
 	}
+	else if (State == MQ2_VERY_TOXIC)
+	{
+		// "Air Very Toxic" doesn't fit next to the bar, which would be full anyway
+		snprintf(Line, sizeof(Line), "%-*s", LCD_COLS, StateNames[State]);
+	}
 	else
 	{
-		// Label on the left, bar to the right: full bar = Air Toxic threshold
+		// Label on the left, bar to the right: full bar = Air Very Toxic level
 		snprintf(Line, sizeof(Line), "%-*s", LABEL_COLS, StateNames[State]);
 		LCD_BuildBar(&Line[LABEL_COLS], BAR_COLS, Percent);
 		Line[LCD_COLS] = '\0';
@@ -131,7 +136,7 @@ int main(void)
 
 	// While smoke is detected, flash the backlight and beep together every other loop
 	AlarmBlink = (State == MQ2_TOXIC || State == MQ2_VERY_TOXIC) ? !AlarmBlink : 0;
-	if (State != MQ2_TOXIC || State != MQ2_VERY_TOXIC || AlarmBlink)
+	if ((State != MQ2_TOXIC && State != MQ2_VERY_TOXIC) || AlarmBlink)
 	{
 		I2C_LCD_Backlight(MyI2C_LCD);
 	}

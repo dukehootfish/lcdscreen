@@ -28,7 +28,7 @@
 #define MQ2_SAMPLES             16      // ADC samples averaged per reading
 #define MQ2_WARMUP_MS           10000   // Heater warm-up time before readings are trusted
 #define MQ2_ALARM_ON_MV_LOW         2000    // AO voltage at or above which smoke is reported
-#define MQ2_ALARM_ON_MV_HIGH		3000
+#define MQ2_ALARM_ON_MV_HIGH		3000    // AO voltage at or above which the air is very toxic (bar full)
 #define MQ2_ALARM_OFF_MV        1800    // AO voltage at or below which the alarm clears (hysteresis)
 #define MQ2_CLEAN_AIR_MV        0       // AO voltage in clean air = 0% on the level bar (set from a real reading)
 
